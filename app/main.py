@@ -4,14 +4,27 @@ import logging
 
 from app.api.routes import router
 from app.core.config import Settings
+from app.services.embeddings_service import EmbeddingService
+from app.services.qdrant_service import QdrantService
 
 logger = logging.getLogger("uvicorn")
-logger.info("*** CERA RAG STARTS ***")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("*** CERA RAG STARTS ***")
     settings = Settings()
+    embeddings = EmbeddingService(settings.embedding_model)
+    qdrant = QdrantService(settings, embeddings)
+    logger.info("Qdrant connected, collection '%s' is ready", settings.qdrant_collection)
+
     app.state.settings = settings
+    logging.basicConfig(
+        level=settings.log_level,
+        format='%(asctime)s %(levelname)s %(name)s %(message)s'
+    )
+    app.state.embeddings = embeddings
+    app.state.qdrant = qdrant
     yield
 
 

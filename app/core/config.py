@@ -12,9 +12,10 @@ class Settings(BaseSettings):
     app_name: str = 'cera_rag'
     log_level: str = 'INFO'
 
-    qdrant_url: str | None = None
+    qdrant_url: str
     qdrant_api_key: str | None = None
     qdrant_collection: str = 'cerany_products'
+    qdrant_timeout: float = 10.0
 
     embedding_model: str = 'sentence-transformers/all-MiniLM-L6-v2'
 
