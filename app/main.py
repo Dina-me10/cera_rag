@@ -6,6 +6,8 @@ from app.api.routes import router
 from app.core.config import Settings
 from app.services.embeddings_service import EmbeddingService
 from app.services.qdrant_service import QdrantService
+from app.services.llm_service import LocalLLM
+from app.services.rag_service import RAGService
 
 logger = logging.getLogger("uvicorn")
 
@@ -17,6 +19,8 @@ async def lifespan(app: FastAPI):
     embeddings = EmbeddingService(settings.embedding_model)
     qdrant = QdrantService(settings, embeddings)
     logger.info("Qdrant connected, collection '%s' is ready", settings.qdrant_collection)
+    llm = LocalLLM(settings)
+    rag = RAGService(settings, embeddings, qdrant, llm)
 
     app.state.settings = settings
     logging.basicConfig(
@@ -25,6 +29,8 @@ async def lifespan(app: FastAPI):
     )
     app.state.embeddings = embeddings
     app.state.qdrant = qdrant
+    app.state.llm = llm
+    app.state.rag = rag
     yield
 
 

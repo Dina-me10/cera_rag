@@ -17,3 +17,5 @@ cera_gpt/checkpoint-*/
 
 # Editor
 .vscode/
+# macOS
+.DS_Store
