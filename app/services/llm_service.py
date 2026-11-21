@@ -15,14 +15,26 @@ class LocalLLM:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self.device = self._resolve_device(settings.llm_device)
+        self._dtype = torch.float16 if self.device in ('mps', 'cuda') else torch.float32
         model, tokenizer = self._load_model_and_tokenizer(settings)
-        device = 0 if settings.llm_device.lower() == 'cuda' and torch.cuda.is_available() else -1
+        model = model.to(self.device)
+        model.eval()
         self._pipeline = pipeline(
             'text-generation',
             model=model,
             tokenizer=tokenizer,
-            device=device,
+            device=self.device,
         )
+
+    @staticmethod
+    def _resolve_device(requested: str | None) -> str:
+        requested = (requested or 'auto').lower()
+        if requested in ('auto', 'mps') and torch.backends.mps.is_available():
+            return 'mps'
+        if requested in ('auto', 'cuda') and torch.cuda.is_available():
+            return 'cuda'
+        return 'cpu'
 
     def generate(self, prompt: str) -> str:
         generator = self._pipeline
@@ -41,7 +53,7 @@ class LocalLLM:
         # LLM_ADAPTER_PATH bo'sh bo'lsa ('' yoki None) -> oddiy TinyLlama
         if not adapter_path:
             tokenizer = AutoTokenizer.from_pretrained(settings.llm_model)
-            model = AutoModelForCausalLM.from_pretrained(settings.llm_model)
+            model = AutoModelForCausalLM.from_pretrained(settings.llm_model, dtype=self._dtype)
             return model, tokenizer
 
         if PeftModel is None or PeftConfig is None:
@@ -59,7 +71,7 @@ class LocalLLM:
             peft_config = None
 
         # 1) asl TinyLlama (miya)  2) unga CeraGPT daftarini ulaymiz
-        model = AutoModelForCausalLM.from_pretrained(base_model_name)
+        model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=self._dtype)
         model = PeftModel.from_pretrained(model, adapter_path)
         model = model.merge_and_unload()
 
