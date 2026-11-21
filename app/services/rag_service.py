@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import re
 import uuid
 
 from app.core.config import Settings
@@ -100,13 +101,14 @@ class RAGService:
     def _build_context(self, sources: list[dict]) -> str:
         chunks = []
         total = 0
-        for index, source in enumerate(sources, start=1):
+        for source in sources:
             text = source['text']
             if not text:
                 continue
             product = (source.get('metadata') or {}).get('product')
             if product:
-                text = f'[{index}] {product}\n{text}'
+                # "[1]" kabi belgilar javobga o'tib ketadi, shuning uchun faqat nom
+                text = f'{product}\n{text}'
             if total + len(text) > self._settings.max_context_chars:
                 break
             chunks.append(text)
@@ -119,10 +121,10 @@ class RAGService:
         if context:
             input_block = f'CERANY product information:\n{context}'
             rules = (
-                'You are CeraGPT, the skincare assistant of CERANY (a K-beauty store). '
-                'Answer the customer question using the CERANY product information when relevant. '
-                'Only recommend products that appear in the product information. '
-                'Keep the answer to 2-5 sentences.'
+                'You are CeraGPT, the skincare assistant of CERANY. '
+                'Recommend the product from the product information below that best fits the question. '
+                'Mention its exact name, why it fits, and how to use it. '
+                'Answer in 2-3 sentences. Do not mention any other product.'
             )
             return (
                 f'### Instruction:\n{rules}\n\nQuestion: {question}\n\n'
@@ -160,7 +162,15 @@ class RAGService:
         for marker in ('### Instruction', '### Input', '### Response', '\nQuestion:', 'Question:'):
             if marker in answer:
                 answer = answer.split(marker, 1)[0]
-        return answer.strip()
+        # Qolib ketgan "[1]", "[2]" belgilarini olib tashlaymiz
+        answer = re.sub(r'\s*\[\d+\]\s*', ' ', answer)
+        answer = re.sub(r' {2,}', ' ', answer).strip()
+        # Model gap o'rtasida to'xtasa, oxirgi to'liq gapgacha qirqamiz
+        if answer and answer[-1] not in '.!?':
+            last_end = max(answer.rfind('.'), answer.rfind('!'), answer.rfind('?'))
+            if last_end != -1:
+                answer = answer[: last_end + 1]
+        return answer
 
     def _is_small_talk(self, question: str) -> bool:
         """Salomlashish yoki "sen kimsan" kabi savollar uchun bazadan qidirish shart emas."""

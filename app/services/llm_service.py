@@ -43,6 +43,7 @@ class LocalLLM:
             max_new_tokens=self._settings.llm_max_new_tokens,
             temperature=self._settings.llm_temperature,
             do_sample=self._settings.llm_temperature > 0,
+            repetition_penalty=1.15,
             pad_token_id=generator.tokenizer.eos_token_id,
         )
         text = outputs[0]['generated_text']
