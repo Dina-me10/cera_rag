@@ -27,6 +27,10 @@ CATEGORY_WORDS = {
 }
 CATEGORY_BOOST = 0.15
 
+# Savoldagi teri turi so'zi "Skin type:" qatorida bo'lsa qo'shimcha ball
+SKIN_TYPE_WORDS = {'dry', 'oily', 'sensitive', 'combination', 'acne', 'normal', 'mature', 'dull'}
+SKIN_TYPE_BOOST = 0.10
+
 
 # orchestrator
 class RAGService:
@@ -92,7 +96,7 @@ class RAGService:
         if self._settings.rag_enabled and self._settings.rag_mode != 'never':
             query_vector = self._embeddings.embed_texts([question])[0]
             sources = self._qdrant.search(query_vector, limit=max(self._settings.top_k, 5))
-            sources = self._rerank_by_category(question, sources)
+            sources = self._rerank(question, sources)
             filtered = [s for s in sources if s['score'] >= self._settings.min_score]
 
             use_rag = self._settings.rag_mode == 'always'
@@ -125,20 +129,28 @@ class RAGService:
         return None
 
     @staticmethod
-    def _rerank_by_category(question: str, sources: list[dict]) -> list[dict]:
-        """Savolda kategoriya so'zi bo'lsa, shu kategoriyadagi mahsulotlarni yuqoriga chiqaradi.
+    def _rerank(question: str, sources: list[dict]) -> list[dict]:
+        """Savoldagi kategoriya va teri turi so'zlariga mos mahsulotlarni yuqoriga chiqaradi.
 
         Tartiblash kuchaytirilgan ball bo'yicha, lekin qaytariladigan "score" asl Qdrant balli.
         """
         q_words = set(re.findall(r'[a-z0-9]+', question.lower()))
-        targets = {t for word, group in CATEGORY_WORDS.items() if word in q_words for t in group}
-        if not targets:
+        categories = {t for word, group in CATEGORY_WORDS.items() if word in q_words for t in group}
+        skin_types = SKIN_TYPE_WORDS & q_words
+        if not categories and not skin_types:
             return sources
 
+        def field(text: str, name: str) -> str:
+            match = re.search(rf'^{name}:(.*)$', text, re.IGNORECASE | re.MULTILINE)
+            return match.group(1).lower() if match else ''
+
         def boosted(source: dict) -> float:
-            match = re.search(r'^Category:(.*)$', source.get('text') or '', re.IGNORECASE | re.MULTILINE)
-            category = match.group(1).lower() if match else ''
-            bonus = CATEGORY_BOOST if any(t in category for t in targets) else 0.0
+            text = source.get('text') or ''
+            bonus = 0.0
+            if categories and any(t in field(text, 'Category') for t in categories):
+                bonus += CATEGORY_BOOST
+            if skin_types and any(t in field(text, 'Skin type') for t in skin_types):
+                bonus += SKIN_TYPE_BOOST
             return source['score'] + bonus
 
         return sorted(sources, key=boosted, reverse=True)
