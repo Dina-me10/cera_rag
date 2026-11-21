@@ -11,3 +11,9 @@ __pycache__
 .vscode
 
 .idea/
+
+# Training checkpoints (katta fayllar)
+cera_gpt/checkpoint-*/
+
+# Editor
+.vscode/
