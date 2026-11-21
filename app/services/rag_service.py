@@ -12,6 +12,21 @@ from app.services.qdrant_service import QdrantService
 # Faqat shu turdagi fayllar bazaga yuklanadi (mahsulot tavsiflari)
 ALLOWED_SUFFIXES = {'.md', '.txt', '.json'}
 
+# Savoldagi so'z -> "Category:" qatorida qidiriladigan so'zlar
+CATEGORY_WORDS = {
+    'cleanser': ('cleanser',),
+    'toner': ('toner',),
+    'serum': ('serum',),
+    'ampoule': ('ampoule',),
+    'cream': ('cream', 'moisturizer'),
+    'moisturizer': ('moisturizer', 'cream'),
+    'sunscreen': ('sunscreen',),
+    'sun': ('sunscreen',),
+    'spf': ('sunscreen',),
+    'mask': ('mask',),
+}
+CATEGORY_BOOST = 0.15
+
 
 # orchestrator
 class RAGService:
@@ -58,7 +73,7 @@ class RAGService:
             if not chunks:
                 skipped += 1
                 continue
-            product = file_path.stem.replace('_', ' ').replace('-', ' ')
+            product = self._extract_title(text) or file_path.stem.replace('_', ' ').replace('-', ' ')
             for index, chunk in enumerate(chunks):
                 documents.append(
                     {
@@ -76,7 +91,8 @@ class RAGService:
         context = ''
         if self._settings.rag_enabled and self._settings.rag_mode != 'never':
             query_vector = self._embeddings.embed_texts([question])[0]
-            sources = self._qdrant.search(query_vector, limit=self._settings.top_k)
+            sources = self._qdrant.search(query_vector, limit=max(self._settings.top_k, 5))
+            sources = self._rerank_by_category(question, sources)
             filtered = [s for s in sources if s['score'] >= self._settings.min_score]
 
             use_rag = self._settings.rag_mode == 'always'
@@ -97,6 +113,35 @@ class RAGService:
 
         answer = self._llm.generate(self._build_prompt(question, context))
         return self._clean_answer(answer), filtered
+
+    @staticmethod
+    def _extract_title(text: str) -> str | None:
+        """Fayldagi birinchi "# " qatoridan mahsulot nomini oladi."""
+        for line in text.splitlines():
+            if line.startswith('# '):
+                title = line[2:].strip()
+                if title:
+                    return title
+        return None
+
+    @staticmethod
+    def _rerank_by_category(question: str, sources: list[dict]) -> list[dict]:
+        """Savolda kategoriya so'zi bo'lsa, shu kategoriyadagi mahsulotlarni yuqoriga chiqaradi.
+
+        Tartiblash kuchaytirilgan ball bo'yicha, lekin qaytariladigan "score" asl Qdrant balli.
+        """
+        q_words = set(re.findall(r'[a-z0-9]+', question.lower()))
+        targets = {t for word, group in CATEGORY_WORDS.items() if word in q_words for t in group}
+        if not targets:
+            return sources
+
+        def boosted(source: dict) -> float:
+            match = re.search(r'^Category:(.*)$', source.get('text') or '', re.IGNORECASE | re.MULTILINE)
+            category = match.group(1).lower() if match else ''
+            bonus = CATEGORY_BOOST if any(t in category for t in targets) else 0.0
+            return source['score'] + bonus
+
+        return sorted(sources, key=boosted, reverse=True)
 
     def _build_context(self, sources: list[dict]) -> str:
         chunks = []
